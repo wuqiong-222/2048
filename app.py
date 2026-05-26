@@ -15,279 +15,300 @@ if "board" not in st.session_state:
     st.session_state.score = 0
     st.session_state.game_over = False
     # 开局生成2个数字
-    empty = [(i, j) for i in range(4) for j in range(4)]
+    positions = [(i, j) for i in range(4) for j in range(4)]
     for _ in range(2):
-        i, j = random.choice([(x, y) for x, y in empty if st.session_state.board[x][y] == 0])
-        st.session_state.board[i][j] = 2 if random.random() < 0.9 else 4
+        empty = [p for p in positions if st.session_state.board[p[0]][p[1]] == 0]
+        if empty:
+            i, j = random.choice(empty)
+            st.session_state.board[i][j] = 2 if random.random() < 0.9 else 4
 
-# 样式美化 + 触屏滑动支持
-st.markdown("""
-<style>
-.block-container {padding-top: 1rem;}
-.grid-container {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 10px;
-    margin: 20px auto;
-    max-width: 400px;
-    background: #bbada0;
-    padding: 15px;
-    border-radius: 12px;
-    cursor: pointer;
-    touch-action: none;  /* 完全禁止浏览器手势，让滑动更灵敏 */
-}
-.grid-item {
-    aspect-ratio: 1 / 1;
-    border-radius: 8px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 28px;
-    font-weight: bold;
-    color: #776e65;
-    background: #cdc1b4;
-    transition: all 0.1s ease;
-}
-/* 不同数字的背景色 */
-.grid-item:contains("2") { background: #eee4da; }
-.grid-item:contains("4") { background: #ede0c8; }
-.grid-item:contains("8") { background: #f2b179; color: white; }
-.grid-item:contains("16") { background: #f59563; color: white; }
-.grid-item:contains("32") { background: #f67c5f; color: white; }
-.grid-item:contains("64") { background: #f65e3b; color: white; }
-.grid-item:contains("128") { background: #edcf72; color: white; }
-.grid-item:contains("256") { background: #edcc61; color: white; }
-.grid-item:contains("512") { background: #edc850; color: white; }
-.grid-item:contains("1024") { background: #edc53f; color: white; }
-.grid-item:contains("2048") { background: #edc22e; color: white; }
-</style>
-
-<script src="https://cdnjs.cloudflare.com/ajax/libs/hammer.js/2.0.8/hammer.min.js"></script>
-
-<script>
-// 等待页面完全加载
-(function() {
-    function initSwipe() {
-        const container = document.querySelector('.grid-container');
-        if (!container) {
-            setTimeout(initSwipe, 100);
-            return;
-        }
-        
-        // 创建 Hammer 实例，专门监听滑动
-        const hammertime = new Hammer(container);
-        hammertime.get('swipe').set({
-            direction: Hammer.DIRECTION_ALL,
-            threshold: 10,     // 滑动10px就触发
-            velocity: 0.1      // 速度阈值降低，更容易触发
-        });
-        
-        // 辅助函数：点击对应的方向按钮
-        function swipeDirection(direction) {
-            const buttons = document.querySelectorAll('button');
-            for (let btn of buttons) {
-                const text = btn.innerText || btn.textContent;
-                if (direction === 'left' && (text.includes('⬅️') || text.includes('左'))) {
-                    btn.click();
-                    console.log('触发左滑');
-                    break;
-                } else if (direction === 'right' && (text.includes('➡️') || text.includes('右'))) {
-                    btn.click();
-                    console.log('触发右滑');
-                    break;
-                } else if (direction === 'up' && (text.includes('⬆️') || text.includes('上'))) {
-                    btn.click();
-                    console.log('触发上滑');
-                    break;
-                } else if (direction === 'down' && (text.includes('⬇️') || text.includes('下'))) {
-                    btn.click();
-                    console.log('触发下滑');
-                    break;
-                }
-            }
-        }
-        
-        // 绑定滑动事件
-        hammertime.on('swipeleft', function(e) {
-            e.preventDefault();
-            swipeDirection('left');
-        });
-        
-        hammertime.on('swiperight', function(e) {
-            e.preventDefault();
-            swipeDirection('right');
-        });
-        
-        hammertime.on('swipeup', function(e) {
-            e.preventDefault();
-            swipeDirection('up');
-        });
-        
-        hammertime.on('swipedown', function(e) {
-            e.preventDefault();
-            swipeDirection('down');
-        });
-        
-        console.log('触摸滑动已启用！');
-    }
-    
-    // 确保 DOM 加载完成
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', initSwipe);
-    } else {
-        initSwipe();
-    }
-})();
-</script>
-""", unsafe_allow_html=True)
-
-# 核心逻辑：左滑
-def move_left(board):
+# 核心游戏逻辑
+def compress(board):
+    """压缩行，去掉0"""
     new_board = np.zeros_like(board)
+    for i in range(4):
+        pos = 0
+        for j in range(4):
+            if board[i][j] != 0:
+                new_board[i][pos] = board[i][j]
+                pos += 1
+    return new_board
+
+def merge(board):
+    """合并相邻相同数字"""
     score = 0
     for i in range(4):
-        # 去掉0
-        row = board[i][board[i] != 0]
-        merged = []
-        skip = False
-        for j in range(len(row)):
-            if skip:
-                skip = False
-                continue
-            if j + 1 < len(row) and row[j] == row[j+1]:
-                merged.append(row[j] * 2)
-                score += row[j] * 2
-                skip = True
-            else:
-                merged.append(row[j])
-        # 补0
-        new_board[i, :len(merged)] = merged
+        for j in range(3):
+            if board[i][j] == board[i][j+1] and board[i][j] != 0:
+                board[i][j] *= 2
+                score += board[i][j]
+                board[i][j+1] = 0
+    return board, score
+
+def move_left(board):
+    """左移主逻辑"""
+    new_board = compress(board)
+    new_board, score = merge(new_board)
+    new_board = compress(new_board)
     return new_board, score
 
-# 检查是否有合法移动
-def can_move():
+def move_right(board):
+    """右移"""
+    flipped = np.fliplr(board)
+    flipped, score = move_left(flipped)
+    return np.fliplr(flipped), score
+
+def move_up(board):
+    """上移"""
+    rotated = np.rot90(board)
+    rotated, score = move_left(rotated)
+    return np.rot90(rotated, k=-1), score
+
+def move_down(board):
+    """下移"""
+    rotated = np.rot90(board, k=-1)
+    rotated, score = move_left(rotated)
+    return np.rot90(rotated), score
+
+def add_new_number():
+    """添加新数字（2或4）"""
+    empty = [(i, j) for i in range(4) for j in range(4) if st.session_state.board[i][j] == 0]
+    if empty:
+        i, j = random.choice(empty)
+        st.session_state.board[i][j] = 2 if random.random() < 0.9 else 4
+        
+        # 检查游戏是否结束
+        if not any_move_possible():
+            st.session_state.game_over = True
+
+def any_move_possible():
+    """检查是否还有合法移动"""
     board = st.session_state.board
+    # 检查是否有空格
+    if 0 in board:
+        return True
+    # 检查是否有相邻相同数字
     for i in range(4):
         for j in range(4):
-            if board[i][j] == 0:
-                return True
             if j < 3 and board[i][j] == board[i][j+1]:
                 return True
             if i < 3 and board[i][j] == board[i+1][j]:
                 return True
     return False
 
-# 随机生成新数字
-def add_num():
-    empty = [(i, j) for i in range(4) for j in range(4) if st.session_state.board[i][j] == 0]
-    if not empty:
-        if not can_move():
-            st.session_state.game_over = True
-        return
-    i, j = random.choice(empty)
-    st.session_state.board[i][j] = 2 if random.random() < 0.9 else 4
-
-# 四个方向控制
-def move_up():
+# 移动操作（带状态更新）
+def perform_move(move_func):
     if st.session_state.game_over:
-        return
+        return False
+    
     old_board = st.session_state.board.copy()
-    st.session_state.board = np.rot90(st.session_state.board)
-    b, s = move_left(st.session_state.board)
-    st.session_state.board = np.rot90(b, k=3)
-    if not np.array_equal(old_board, st.session_state.board):
-        st.session_state.score += s
-        add_num()
+    new_board, score_gain = move_func(st.session_state.board)
+    
+    if not np.array_equal(old_board, new_board):
+        st.session_state.board = new_board
+        st.session_state.score += score_gain
+        add_new_number()
+        return True
+    return False
 
-def move_down():
-    if st.session_state.game_over:
-        return
-    old_board = st.session_state.board.copy()
-    st.session_state.board = np.rot90(st.session_state.board, k=3)
-    b, s = move_left(st.session_state.board)
-    st.session_state.board = np.rot90(b)
-    if not np.array_equal(old_board, st.session_state.board):
-        st.session_state.score += s
-        add_num()
+def action_up():
+    perform_move(move_up)
 
-def move_left():
-    if st.session_state.game_over:
-        return
-    old_board = st.session_state.board.copy()
-    b, s = move_left(st.session_state.board)
-    st.session_state.board = b
-    if not np.array_equal(old_board, st.session_state.board):
-        st.session_state.score += s
-        add_num()
+def action_down():
+    perform_move(move_down)
 
-def move_right():
-    if st.session_state.game_over:
-        return
-    old_board = st.session_state.board.copy()
-    flipped = np.fliplr(st.session_state.board)
-    b, s = move_left(flipped)
-    st.session_state.board = np.fliplr(b)
-    if not np.array_equal(old_board, st.session_state.board):
-        st.session_state.score += s
-        add_num()
+def action_left():
+    perform_move(move_left)
 
-# 重置游戏
+def action_right():
+    perform_move(move_right)
+
 def reset_game():
     st.session_state.board = np.zeros((4, 4), dtype=int)
     st.session_state.score = 0
     st.session_state.game_over = False
-    empty = [(i, j) for i in range(4) for j in range(4)]
+    positions = [(i, j) for i in range(4) for j in range(4)]
     for _ in range(2):
-        i, j = random.choice(empty)
-        st.session_state.board[i][j] = 2
-        empty.remove((i, j))
+        empty = [p for p in positions if st.session_state.board[p[0]][p[1]] == 0]
+        if empty:
+            i, j = random.choice(empty)
+            st.session_state.board[i][j] = 2
 
-# ========== UI 界面 ==========
+# 自定义CSS - 包含触摸滑动
+st.markdown("""
+<style>
+/* 主容器样式 */
+.main-header {
+    text-align: center;
+    margin-bottom: 20px;
+}
+
+/* 棋盘容器 - 支持触摸滑动 */
+.game-container {
+    display: flex;
+    justify-content: center;
+    margin: 20px 0;
+    touch-action: none;
+}
+
+.grid-container {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+    background: #bbada0;
+    padding: 15px;
+    border-radius: 12px;
+    max-width: 450px;
+    width: 100%;
+    cursor: pointer;
+    touch-action: none;
+    user-select: none;
+}
+
+.grid-item {
+    aspect-ratio: 1 / 1;
+    background: #cdc1b4;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 32px;
+    font-weight: bold;
+    transition: all 0.1s ease;
+}
+
+/* 数字颜色 */
+.num-0 { background: #cdc1b4; color: #776e65; }
+.num-2 { background: #eee4da; color: #776e65; }
+.num-4 { background: #ede0c8; color: #776e65; }
+.num-8 { background: #f2b179; color: #f9f6f2; }
+.num-16 { background: #f59563; color: #f9f6f2; }
+.num-32 { background: #f67c5f; color: #f9f6f2; }
+.num-64 { background: #f65e3b; color: #f9f6f2; }
+.num-128 { background: #edcf72; color: #f9f6f2; font-size: 28px; }
+.num-256 { background: #edcc61; color: #f9f6f2; font-size: 28px; }
+.num-512 { background: #edc850; color: #f9f6f2; font-size: 28px; }
+.num-1024 { background: #edc53f; color: #f9f6f2; font-size: 24px; }
+.num-2048 { background: #edc22e; color: #f9f6f2; font-size: 24px; }
+
+.button-row {
+    display: flex;
+    gap: 10px;
+    justify-content: center;
+    margin: 20px 0;
+}
+</style>
+
+<!-- 触摸滑动脚本 -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/hammer.js/2.0.8/hammer.min.js"></script>
+
+<script>
+(function() {
+    // 等待DOM加载完成
+    function initTouch() {
+        const gridContainer = document.querySelector('.grid-container');
+        if (!gridContainer) {
+            setTimeout(initTouch, 100);
+            return;
+        }
+        
+        console.log("触摸滑动已初始化");
+        
+        // 创建Hammer实例
+        const hammer = new Hammer(gridContainer);
+        hammer.get('swipe').set({
+            direction: Hammer.DIRECTION_ALL,
+            threshold: 20,
+            velocity: 0.3
+        });
+        
+        // 滑动回调
+        hammer.on('swipeleft', function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            console.log("左滑触发");
+            const btn = Array.from(document.querySelectorAll('button')).find(b => 
+                b.innerText.includes('左') || b.innerText.includes('⬅️')
+            );
+            if (btn) btn.click();
+        });
+        
+        hammer.on('swiperight', function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            console.log("右滑触发");
+            const btn = Array.from(document.querySelectorAll('button')).find(b => 
+                b.innerText.includes('右') || b.innerText.includes('➡️')
+            );
+            if (btn) btn.click();
+        });
+        
+        hammer.on('swipeup', function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            console.log("上滑触发");
+            const btn = Array.from(document.querySelectorAll('button')).find(b => 
+                b.innerText.includes('上') || b.innerText.includes('⬆️')
+            );
+            if (btn) btn.click();
+        });
+        
+        hammer.on('swipedown', function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            console.log("下滑触发");
+            const btn = Array.from(document.querySelectorAll('button')).find(b => 
+                b.innerText.includes('下') || b.innerText.includes('⬇️')
+            );
+            if (btn) btn.click();
+        });
+    }
+    
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initTouch);
+    } else {
+        initTouch();
+    }
+})();
+</script>
+""", unsafe_allow_html=True)
+
+# UI界面
 st.title("🎮 2048 数字游戏")
-st.caption("💡 PC端：按键盘方向键（↑↓←→）| 📱 移动端：在棋盘上滑动手指")
+st.markdown("<p style='text-align: center; color: #666;'>💡 PC端：键盘方向键 | 📱 移动端：在棋盘上滑动手指</p>", unsafe_allow_html=True)
 
-# 显示分数
-col1, col2, col3 = st.columns([1, 2, 1])
-col1.metric("当前分数", st.session_state.score)
+# 分数显示
+col1, col2, col3 = st.columns([1, 1, 1])
+col2.metric("🏆 当前分数", st.session_state.score)
 
-# 绘制棋盘（带颜色）
-grid_html = "<div class='grid-container'>"
+# 显示棋盘
+grid_html = '<div class="game-container"><div class="grid-container">'
 for i in range(4):
     for j in range(4):
-        num = st.session_state.board[i][j]
-        val = str(num) if num != 0 else ""
-        # 内联样式给数字背景色
-        bg_color = "#cdc1b4"
-        text_color = "#776e65"
-        if num == 2: bg_color = "#eee4da"
-        elif num == 4: bg_color = "#ede0c8"
-        elif num == 8: bg_color = "#f2b179"; text_color = "white"
-        elif num == 16: bg_color = "#f59563"; text_color = "white"
-        elif num == 32: bg_color = "#f67c5f"; text_color = "white"
-        elif num == 64: bg_color = "#f65e3b"; text_color = "white"
-        elif num >= 128: bg_color = "#edcf72"; text_color = "white"
-        
-        grid_html += f"<div class='grid-item' style='background: {bg_color}; color: {text_color};'>{val}</div>"
-grid_html += "</div>"
+        val = st.session_state.board[i][j]
+        num_class = f"num-{val}" if val in [0,2,4,8,16,32,64,128,256,512,1024,2048] else "num-0"
+        display_text = str(val) if val != 0 else ""
+        grid_html += f'<div class="grid-item {num_class}">{display_text}</div>'
+grid_html += '</div></div>'
 st.markdown(grid_html, unsafe_allow_html=True)
 
 # 游戏结束提示
 if st.session_state.game_over:
-    st.error("❌ 游戏结束！点击下方按钮重新开始")
+    st.error("💀 游戏结束！点击下方按钮重新开始")
 
-# 方向按钮（作为备用和移动端回调）
-c1, c2, c3, c4 = st.columns(4)
-with c1:
-    st.button("⬆️ 上", use_container_width=True, on_click=move_up)
-with c2:
-    st.button("⬅️ 左", use_container_width=True, on_click=move_left)
-with c3:
-    st.button("➡️ 右", use_container_width=True, on_click=move_right)
-with c4:
-    st.button("⬇️ 下", use_container_width=True, on_click=move_down)
+# 控制按钮
+col1, col2, col3, col4 = st.columns(4)
+with col1:
+    st.button("⬆️ 上", use_container_width=True, on_click=action_up, key="up")
+with col2:
+    st.button("⬅️ 左", use_container_width=True, on_click=action_left, key="left")
+with col3:
+    st.button("➡️ 右", use_container_width=True, on_click=action_right, key="right")
+with col4:
+    st.button("⬇️ 下", use_container_width=True, on_click=action_down, key="down")
 
 # 重置按钮
-if st.button("🔄 重新开始", type="primary", use_container_width=True):
+if st.button("🔄 重新开始", use_container_width=True, type="primary"):
     reset_game()
     st.rerun()
 
@@ -296,28 +317,26 @@ st.markdown("""
 <script>
 document.addEventListener('keydown', function(event) {
     const key = event.key;
-    let btnText = null;
+    let buttonText = null;
     
-    // 映射方向键
     if (key === 'ArrowUp') {
-        btnText = '⬆️';
+        buttonText = '上';
         event.preventDefault();
     } else if (key === 'ArrowDown') {
-        btnText = '⬇️';
+        buttonText = '下';
         event.preventDefault();
     } else if (key === 'ArrowLeft') {
-        btnText = '⬅️';
+        buttonText = '左';
         event.preventDefault();
     } else if (key === 'ArrowRight') {
-        btnText = '➡️';
+        buttonText = '右';
         event.preventDefault();
     }
     
-    if (btnText) {
-        // 查找对应的按钮并点击
-        const btns = document.querySelectorAll('button');
-        for (let btn of btns) {
-            if (btn.innerText.includes(btnText)) {
+    if (buttonText) {
+        const buttons = document.querySelectorAll('button');
+        for (let btn of buttons) {
+            if (btn.innerText.includes(buttonText)) {
                 btn.click();
                 break;
             }
