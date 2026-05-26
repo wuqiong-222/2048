@@ -1,126 +1,243 @@
 import streamlit as st
-import numpy as np
 import random
+import json
 
-# 页面配置
+# ------------------- 页面配置（必须放最顶部）-------------------
 st.set_page_config(
-    page_title="2048 游戏",
-    page_icon="🎮",
-    layout="centered"
+    page_title="2048",
+    layout="centered",
+    initial_sidebar_state="collapsed"
 )
 
-# 初始化游戏状态
-if "board" not in st.session_state:
-    st.session_state.board = np.zeros((4, 4), dtype=int)
-    st.session_state.score = 0
-    st.session_state.game_over = False
-    # 开局生成2个数字
-    add_new = lambda b: random.choice([(i, j) for i in range(4) for j in range(4) if b[i][j] == 0])
-    for _ in range(2):
-        i, j = add_new(st.session_state.board)
-        st.session_state.board[i][j] = 2 if random.random() < 0.9 else 4
-
-# 样式美化
+# ------------------- 样式：电脑+手机双端适配 -------------------
 st.markdown("""
 <style>
-.block-container {padding-top: 1rem;}
-.grid-container {display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin: 20px auto; max-width: 400px;}
-.grid-item {
-    width: 90px; height: 90px; border-radius: 8px; display: flex; align-items: center;
-    justify-content: center; font-size: 24px; font-weight: bold; color: #333;
-    background: #eee; border: 2px solid #ccc;
+/* 全局适配 */
+html, body {
+    overflow-x: hidden;
+    max-width: 100vw;
+    margin: 0 auto;
+}
+
+/* 棋盘容器：自动居中、自动缩放 */
+.board-container {
+    width: 90vw;
+    max-width: 420px;
+    margin: 10px auto;
+    touch-action: manipulation;
+}
+
+/* 4×4 网格 */
+.board {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 8px;
+    background: #bbada0;
+    padding: 10px;
+    border-radius: 10px;
+}
+
+/* 格子：正方形、自适应 */
+.cell {
+    aspect-ratio: 1 / 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: clamp(20px, 6vw, 32px);
+    font-weight: bold;
+    border-radius: 6px;
+    background: #cdc1b4;
+    color: #776e65;
+}
+
+/* 数字颜色 */
+.c2 { background:#eee4da; }
+.c4 { background:#ede0c8; }
+.c8 { background:#f2b179; color:white; }
+.c16 { background:#f59563; color:white; }
+.c32 { background:#f67c5f; color:white; }
+.c64 { background:#f65e3b; color:white; }
+.c128 { background:#edcf72; color:white; }
+.c256 { background:#edcc61; color:white; }
+.c512 { background:#ecc850; color:white; }
+.c1024 { background:#edc22e; color:white; }
+.c2048 { background:#3c3a32; color:white; }
+
+/* 按钮放大，手机好按 */
+.stButton button {
+    font-size: 18px !important;
+    padding: 12px !important;
+    border-radius: 10px !important;
 }
 </style>
 """, unsafe_allow_html=True)
 
-# 核心逻辑：左滑（上下右都是左滑+翻转矩阵）
+# ------------------- 游戏核心逻辑 -------------------
+def init_board():
+    board = [[0]*4 for _ in range(4)]
+    add_random(board)
+    add_random(board)
+    return board
+
+def add_random(board):
+    empty = [(r,c) for r in range(4) for c in range(4) if board[r][c]==0]
+    if empty:
+        r,c = random.choice(empty)
+        board[r][c] = 2 if random.random()<0.9 else 4
+
+def flatten(row):
+    nums = [x for x in row if x != 0]
+    for i in range(len(nums)-1):
+        if nums[i]==nums[i+1]:
+            nums[i] *= 2
+            nums[i+1] = 0
+    nums = [x for x in nums if x != 0]
+    return nums + [0]*(4-len(nums))
+
 def move_left(board):
-    new_board = np.zeros_like(board)
-    score = 0
-    for i in range(4):
-        row = board[i][board[i] != 0]
-        merged = []
-        skip = False
-        for j in range(len(row)):
-            if skip:
-                skip = False
-                continue
-            if j + 1 < len(row) and row[j] == row[j+1]:
-                merged.append(row[j] * 2)
-                score += row[j] * 2
-                skip = True
-            else:
-                merged.append(row[j])
-        new_board[i, :len(merged)] = merged
-    return new_board, score
+    new = [flatten(row) for row in board]
+    return new if new != board else None
 
-# 四个方向控制
-def up():
-    st.session_state.board = np.rot90(st.session_state.board)
-    b, s = move_left(st.session_state.board)
-    st.session_state.board = np.rot90(b, k=3)
-    st.session_state.score += s
-    add_num()
+def rotate(board):
+    return [list(x) for x in zip(*board[::-1])]
 
-def down():
-    st.session_state.board = np.rot90(st.session_state.board, k=3)
-    b, s = move_left(st.session_state.board)
-    st.session_state.board = np.rot90(b)
-    st.session_state.score += s
-    add_num()
+def move_right(board):
+    b = [row[::-1] for row in board]
+    b = move_left(b)
+    return [row[::-1] for row in b] if b else None
 
-def left():
-    b, s = move_left(st.session_state.board)
-    st.session_state.board = b
-    st.session_state.score += s
-    add_num()
+def move_up(board):
+    b = rotate(rotate(rotate(board)))
+    b = move_left(b)
+    return rotate(b) if b else None
 
-def right():
-    st.session_state.board = np.fliplr(st.session_state.board)
-    b, s = move_left(st.session_state.board)
-    st.session_state.board = np.fliplr(b)
-    st.session_state.score += s
-    add_num()
+def move_down(board):
+    b = rotate(board)
+    b = move_left(b)
+    return rotate(rotate(rotate(b))) if b else None
 
-# 随机生成 2 或 4
-def add_num():
-    empty = [(i, j) for i in range(4) for j in range(4) if st.session_state.board[i][j] == 0]
-    if not empty:
-        st.session_state.game_over = True
+def is_win(board):
+    return any(2048 in row for row in board)
+
+def is_lose(board):
+    if any(0 in row for row in board):
+        return False
+    for r in range(4):
+        for c in range(4):
+            v = board[r][c]
+            if r<3 and board[r+1][c]==v: return False
+            if c<3 and board[r][c+1]==v: return False
+    return True
+
+# ------------------- 状态初始化 -------------------
+if "board" not in st.session_state:
+    st.session_state.board = init_board()
+if "game_over" not in st.session_state:
+    st.session_state.game_over = False
+if "win" not in st.session_state:
+    st.session_state.win = False
+
+# ------------------- 键盘/滑动 支持 -------------------
+if "key" not in st.session_state:
+    st.session_state.key = ""
+
+# JS 监听键盘 + 触屏滑动
+st.markdown("""
+<script>
+// 键盘 ↑ ↓ ← →
+document.addEventListener('keydown', function(e) {
+    let key = '';
+    if(e.key==='ArrowUp') key='up';
+    if(e.key==='ArrowDown') key='down';
+    if(e.key==='ArrowLeft') key='left';
+    if(e.key==='ArrowRight') key='right';
+    if(key) {
+        window.parent.postMessage({type: 'key', data: key}, '*');
+        e.preventDefault();
+    }
+});
+
+// 手机触屏滑动
+let touchX, touchY;
+document.addEventListener('touchstart', e=>{touchX=e.touches[0].clientX; touchY=e.touches[0].clientY});
+document.addEventListener('touchend', e=>{
+    if(!touchX||!touchY) return;
+    let dx = e.changedTouches[0].clientX - touchX;
+    let dy = e.changedTouches[0].clientY - touchY;
+    let res='';
+    if(Math.abs(dx)>Math.abs(dy)){
+        if(dx>30) res='right';
+        if(dx<-30) res='left';
+    }else{
+        if(dy>30) res='down';
+        if(dy<-30) res='up';
+    }
+    if(res) window.parent.postMessage({type:'swipe',data:res},'*');
+});
+
+// 接收消息发给Streamlit
+window.addEventListener('message', e=>{
+    if(e.data.type==='key'||e.data.type==='swipe'){
+        window.stKey = e.data.data;
+        document.body.click();
+    }
+});
+</script>
+""", unsafe_allow_html=True)
+
+# ------------------- 执行操作 -------------------
+def do_move(func):
+    if st.session_state.game_over:
         return
-    i, j = random.choice(empty)
-    st.session_state.board[i][j] = 2 if random.random() < 0.9 else 4
+    new_board = func(st.session_state.board)
+    if new_board:
+        st.session_state.board = new_board
+        add_random(st.session_state.board)
+        if is_win(st.session_state.board):
+            st.session_state.win = True
+            st.session_state.game_over = True
+        elif is_lose(st.session_state.board):
+            st.session_state.game_over = True
 
-# 界面
-st.title("🎮 2048 数字游戏")
-st.subheader(f"当前分数：{st.session_state.score}")
+# 从JS获取按键
+if "stKey" in globals() and stKey:
+    if stKey == "up": do_move(move_up)
+    if stKey == "down": do_move(move_down)
+    if stKey == "left": do_move(move_left)
+    if stKey == "right": do_move(move_right)
+    stKey = ""
 
-# 绘制棋盘
-grid_html = "<div class='grid-container'>"
-for row in st.session_state.board:
-    for num in row:
-        val = num if num != 0 else ""
-        grid_html += f"<div class='grid-item'>{val}</div>"
-grid_html += "</div>"
-st.markdown(grid_html, unsafe_allow_html=True)
-
-# 游戏结束
-if st.session_state.game_over:
-    st.error("❌ 游戏结束！点击「重新开始」再来一把～")
+# ------------------- 界面渲染 -------------------
+st.title("🎮 2048 游戏")
+st.subheader("电脑：键盘 ↑ ↓ ← →  手机：滑动屏幕")
 
 # 按钮
 col1, col2, col3, col4 = st.columns(4)
-with col1: st.button("⬆️ 上", use_container_width=True, on_click=up)
-with col2: st.button("⬅️ 左", use_container_width=True, on_click=left)
-with col3: st.button("➡️ 右", use_container_width=True, on_click=right)
-with col4: st.button("⬇️ 下", use_container_width=True, on_click=down)
+with col1:
+    if st.button("👆 上"): do_move(move_up)
+with col2:
+    if st.button("👇 下"): do_move(move_down)
+with col3:
+    if st.button("👈 左"): do_move(move_left)
+with col4:
+    if st.button("👉 右"): do_move(move_right)
 
-# 重置
-if st.button("🔄 重新开始", type="primary"):
-    st.session_state.board = np.zeros((4, 4), dtype=int)
-    st.session_state.score = 0
+if st.button("🔄 重新开始"):
+    st.session_state.board = init_board()
     st.session_state.game_over = False
-    for _ in range(2):
-        i, j = random.choice([(x, y) for x in range(4) for y in range(4) if st.session_state.board[x][y] == 0])
-        st.session_state.board[i][j] = 2
-    st.rerun()
+    st.session_state.win = False
+
+# 状态
+if st.session_state.win:
+    st.success("🎉 恭喜你，合成 2048 成功！")
+elif st.session_state.game_over:
+    st.error("💥 游戏结束，再来一局吧！")
+
+# 棋盘
+st.markdown('<div class="board-container"><div class="board">', unsafe_allow_html=True)
+for row in st.session_state.board:
+    for num in row:
+        cls = f"cell c{num}" if num != 0 else "cell"
+        txt = str(num) if num != 0 else ""
+        st.markdown(f'<div class="{cls}">{txt}</div>', unsafe_allow_html=True)
+st.markdown('</div></div>', unsafe_allow_html=True)
