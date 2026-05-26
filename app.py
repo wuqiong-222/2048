@@ -1,243 +1,261 @@
 import streamlit as st
 import random
-import json
 
-# ------------------- 页面配置（必须放最顶部）-------------------
+# 页面配置（必须置顶）
 st.set_page_config(
     page_title="2048",
     layout="centered",
     initial_sidebar_state="collapsed"
 )
 
-# ------------------- 样式：电脑+手机双端适配 -------------------
+# 全局样式 + 精准尺寸适配（修复尺寸问题）
 st.markdown("""
 <style>
-/* 全局适配 */
-html, body {
-    overflow-x: hidden;
-    max-width: 100vw;
+/* 整体页面约束，防止溢出 */
+.main {
+    max-width: 480px;
     margin: 0 auto;
+    padding: 10px;
 }
-
-/* 棋盘容器：自动居中、自动缩放 */
-.board-container {
-    width: 90vw;
-    max-width: 420px;
-    margin: 10px auto;
-    touch-action: manipulation;
+/* 棋盘外层容器 */
+.game-board-wrap {
+    width: 100%;
+    background-color: #bbada0;
+    padding: 12px;
+    border-radius: 12px;
+    box-sizing: border-box;
+    margin: 15px 0;
 }
-
-/* 4×4 网格 */
-.board {
+/* 4*4 标准网格，固定等宽列 */
+.game-board {
     display: grid;
     grid-template-columns: repeat(4, 1fr);
-    gap: 8px;
-    background: #bbada0;
-    padding: 10px;
-    border-radius: 10px;
+    gap: 10px;
+    width: 100%;
 }
-
-/* 格子：正方形、自适应 */
+/* 格子：强制正方形，PC/手机统一比例 */
 .cell {
     aspect-ratio: 1 / 1;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: clamp(20px, 6vw, 32px);
+    border-radius: 8px;
     font-weight: bold;
-    border-radius: 6px;
-    background: #cdc1b4;
-    color: #776e65;
+    box-sizing: border-box;
+}
+/* 字体自适应：大屏大字体，小屏自动缩小 */
+@media (min-width: 400px) {
+    .cell { font-size: 30px; }
+}
+@media (max-width: 399px) {
+    .cell { font-size: 22px; }
 }
 
-/* 数字颜色 */
-.c2 { background:#eee4da; }
-.c4 { background:#ede0c8; }
-.c8 { background:#f2b179; color:white; }
-.c16 { background:#f59563; color:white; }
-.c32 { background:#f67c5f; color:white; }
-.c64 { background:#f65e3b; color:white; }
-.c128 { background:#edcf72; color:white; }
-.c256 { background:#edcc61; color:white; }
-.c512 { background:#ecc850; color:white; }
-.c1024 { background:#edc22e; color:white; }
-.c2048 { background:#3c3a32; color:white; }
+/* 数字对应配色 */
+.cell-0 { background: #cdc1b4; color: transparent; }
+.cell-2 { background: #eee4da; color: #776e65; }
+.cell-4 { background: #ede0c8; color: #776e65; }
+.cell-8 { background: #f2b179; color: #ffffff; }
+.cell-16 { background: #f59563; color: #ffffff; }
+.cell-32 { background: #f67c5f; color: #ffffff; }
+.cell-64 { background: #f65e3b; color: #ffffff; }
+.cell-128 { background: #edcf72; color: #ffffff; }
+.cell-256 { background: #edcc61; color: #ffffff; }
+.cell-512 { background: #ecc850; color: #ffffff; }
+.cell-1024 { background: #edc22e; color: #ffffff; }
+.cell-2048 { background: #3c3a32; color: #ffffff; }
 
-/* 按钮放大，手机好按 */
-.stButton button {
-    font-size: 18px !important;
-    padding: 12px !important;
-    border-radius: 10px !important;
+/* 操作按钮样式，适配触屏 */
+.stButton > button {
+    font-size: 16px !important;
+    padding: 10px 0 !important;
+    border-radius: 8px !important;
+    width: 100%;
 }
 </style>
 """, unsafe_allow_html=True)
 
-# ------------------- 游戏核心逻辑 -------------------
+# ===================== 游戏核心逻辑 =====================
 def init_board():
-    board = [[0]*4 for _ in range(4)]
-    add_random(board)
-    add_random(board)
+    board = [[0 for _ in range(4)] for _ in range(4)]
+    add_random_tile(board)
+    add_random_tile(board)
     return board
 
-def add_random(board):
-    empty = [(r,c) for r in range(4) for c in range(4) if board[r][c]==0]
-    if empty:
-        r,c = random.choice(empty)
-        board[r][c] = 2 if random.random()<0.9 else 4
+def add_random_tile(board):
+    empty_cells = [(r, c) for r in range(4) for c in range(4) if board[r][c] == 0]
+    if empty_cells:
+        r, c = random.choice(empty_cells)
+        board[r][c] = 2 if random.random() < 0.9 else 4
 
-def flatten(row):
-    nums = [x for x in row if x != 0]
-    for i in range(len(nums)-1):
-        if nums[i]==nums[i+1]:
-            nums[i] *= 2
-            nums[i+1] = 0
-    nums = [x for x in nums if x != 0]
-    return nums + [0]*(4-len(nums))
+def compress(row):
+    new_row = [num for num in row if num != 0]
+    new_row += [0] * (4 - len(new_row))
+    return new_row
+
+def merge(row):
+    row = compress(row)
+    for i in range(3):
+        if row[i] == row[i+1] and row[i] != 0:
+            row[i] *= 2
+            row[i+1] = 0
+    return compress(row)
 
 def move_left(board):
-    new = [flatten(row) for row in board]
-    return new if new != board else None
+    new_board = [merge(row) for row in board]
+    return new_board if new_board != board else None
 
-def rotate(board):
-    return [list(x) for x in zip(*board[::-1])]
+def rotate_board(b):
+    return [list(col)[::-1] for col in zip(*b)]
 
 def move_right(board):
-    b = [row[::-1] for row in board]
-    b = move_left(b)
-    return [row[::-1] for row in b] if b else None
+    new_board = [merge(row[::-1])[::-1] for row in board]
+    return new_board if new_board != board else None
 
 def move_up(board):
-    b = rotate(rotate(rotate(board)))
-    b = move_left(b)
-    return rotate(b) if b else None
+    rotated = rotate_board(board)
+    new_rot = [merge(row) for row in rotated]
+    new_board = rotate_board(rotate_board(rotate_board(new_rot)))
+    return new_board if new_board != board else None
 
 def move_down(board):
-    b = rotate(board)
-    b = move_left(b)
-    return rotate(rotate(rotate(b))) if b else None
+    rotated = rotate_board(rotate_board(rotate_board(board)))
+    new_rot = [merge(row) for row in rotated]
+    new_board = rotate_board(new_rot)
+    return new_board if new_board != board else None
 
-def is_win(board):
+def check_win(board):
     return any(2048 in row for row in board)
 
-def is_lose(board):
+def check_game_over(board):
     if any(0 in row for row in board):
         return False
     for r in range(4):
         for c in range(4):
-            v = board[r][c]
-            if r<3 and board[r+1][c]==v: return False
-            if c<3 and board[r][c+1]==v: return False
+            curr = board[r][c]
+            if c < 3 and board[r][c+1] == curr:
+                return False
+            if r < 3 and board[r+1][c] == curr:
+                return False
     return True
 
-# ------------------- 状态初始化 -------------------
+# ===================== 会话状态初始化 =====================
 if "board" not in st.session_state:
     st.session_state.board = init_board()
 if "game_over" not in st.session_state:
     st.session_state.game_over = False
-if "win" not in st.session_state:
-    st.session_state.win = False
+if "is_win" not in st.session_state:
+    st.session_state.is_win = False
+if "operate" not in st.session_state:
+    st.session_state.operate = ""
 
-# ------------------- 键盘/滑动 支持 -------------------
-if "key" not in st.session_state:
-    st.session_state.key = ""
-
-# JS 监听键盘 + 触屏滑动
+# ===================== 触屏滑动 + 键盘监听 JS =====================
 st.markdown("""
 <script>
-// 键盘 ↑ ↓ ← →
-document.addEventListener('keydown', function(e) {
-    let key = '';
-    if(e.key==='ArrowUp') key='up';
-    if(e.key==='ArrowDown') key='down';
-    if(e.key==='ArrowLeft') key='left';
-    if(e.key==='ArrowRight') key='right';
-    if(key) {
-        window.parent.postMessage({type: 'key', data: key}, '*');
+// 键盘方向键监听
+document.addEventListener("keydown", function(e) {
+    let dir = "";
+    if(e.key === "ArrowUp") dir = "up";
+    if(e.key === "ArrowDown") dir = "down";
+    if(e.key === "ArrowLeft") dir = "left";
+    if(e.key === "ArrowRight") dir = "right";
+    if(dir) {
+        window.streamlitDir = dir;
+        document.body.click();
         e.preventDefault();
     }
 });
 
-// 手机触屏滑动
-let touchX, touchY;
-document.addEventListener('touchstart', e=>{touchX=e.touches[0].clientX; touchY=e.touches[0].clientY});
-document.addEventListener('touchend', e=>{
-    if(!touchX||!touchY) return;
-    let dx = e.changedTouches[0].clientX - touchX;
-    let dy = e.changedTouches[0].clientY - touchY;
-    let res='';
-    if(Math.abs(dx)>Math.abs(dy)){
-        if(dx>30) res='right';
-        if(dx<-30) res='left';
-    }else{
-        if(dy>30) res='down';
-        if(dy<-30) res='up';
-    }
-    if(res) window.parent.postMessage({type:'swipe',data:res},'*');
+// 手机触屏滑动监听
+let startX = 0, startY = 0;
+document.addEventListener("touchstart", function(e) {
+    startX = e.touches[0].clientX;
+    startY = e.touches[0].clientY;
 });
+document.addEventListener("touchend", function(e) {
+    let endX = e.changedTouches[0].clientX;
+    let endY = e.changedTouches[0].clientY;
+    let dx = endX - startX;
+    let dy = endY - startY;
+    let dir = "";
+    const threshold = 40;
 
-// 接收消息发给Streamlit
-window.addEventListener('message', e=>{
-    if(e.data.type==='key'||e.data.type==='swipe'){
-        window.stKey = e.data.data;
+    if(Math.abs(dx) > Math.abs(dy)) {
+        dir = dx > threshold ? "right" : dx < -threshold ? "left" : "";
+    } else {
+        dir = dy > threshold ? "down" : dy < -threshold ? "up" : "";
+    }
+    if(dir) {
+        window.streamlitDir = dir;
         document.body.click();
     }
 });
 </script>
 """, unsafe_allow_html=True)
 
-# ------------------- 执行操作 -------------------
-def do_move(func):
+# 执行移动逻辑
+def run_move(direction):
     if st.session_state.game_over:
         return
-    new_board = func(st.session_state.board)
-    if new_board:
-        st.session_state.board = new_board
-        add_random(st.session_state.board)
-        if is_win(st.session_state.board):
-            st.session_state.win = True
+    b = st.session_state.board
+    new_b = None
+    if direction == "left":
+        new_b = move_left(b)
+    elif direction == "right":
+        new_b = move_right(b)
+    elif direction == "up":
+        new_b = move_up(b)
+    elif direction == "down":
+        new_b = move_down(b)
+
+    if new_b:
+        st.session_state.board = new_b
+        add_random_tile(st.session_state.board)
+        if check_win(st.session_state.board):
+            st.session_state.is_win = True
             st.session_state.game_over = True
-        elif is_lose(st.session_state.board):
+        elif check_game_over(st.session_state.board):
             st.session_state.game_over = True
 
-# 从JS获取按键
-if "stKey" in globals() and stKey:
-    if stKey == "up": do_move(move_up)
-    if stKey == "down": do_move(move_down)
-    if stKey == "left": do_move(move_left)
-    if stKey == "right": do_move(move_right)
-    stKey = ""
+# 接收JS传来的操作指令
+if "streamlitDir" in globals() and streamlitDir:
+    run_move(streamlitDir)
+    streamlitDir = ""
 
-# ------------------- 界面渲染 -------------------
-st.title("🎮 2048 游戏")
-st.subheader("电脑：键盘 ↑ ↓ ← →  手机：滑动屏幕")
+# ===================== 页面渲染 =====================
+st.title("🎮 2048")
+st.caption("电脑：方向键 ↑↓←→ | 手机：屏幕滑动 / 点击按钮")
 
-# 按钮
-col1, col2, col3, col4 = st.columns(4)
-with col1:
-    if st.button("👆 上"): do_move(move_up)
-with col2:
-    if st.button("👇 下"): do_move(move_down)
-with col3:
-    if st.button("👈 左"): do_move(move_left)
-with col4:
-    if st.button("👉 右"): do_move(move_right)
+# 控制按钮区
+b1, b2, b3, b4 = st.columns(4)
+with b1:
+    if st.button("👆 上"):
+        run_move("up")
+with b2:
+    if st.button("👇 下"):
+        run_move("down")
+with b3:
+    if st.button("👈 左"):
+        run_move("left")
+with b4:
+    if st.button("👉 右"):
+        run_move("right")
 
-if st.button("🔄 重新开始"):
+if st.button("🔄 重新开局"):
     st.session_state.board = init_board()
     st.session_state.game_over = False
-    st.session_state.win = False
+    st.session_state.is_win = False
 
-# 状态
-if st.session_state.win:
-    st.success("🎉 恭喜你，合成 2048 成功！")
+# 游戏状态提示
+if st.session_state.is_win:
+    st.success("🎉 恭喜！成功合成 2048，游戏胜利！")
 elif st.session_state.game_over:
-    st.error("💥 游戏结束，再来一局吧！")
+    st.error("💥 格子已满，游戏结束！")
 
-# 棋盘
-st.markdown('<div class="board-container"><div class="board">', unsafe_allow_html=True)
+# 渲染棋盘（严格4*4，尺寸统一）
+board_html = '<div class="game-board-wrap"><div class="game-board">'
 for row in st.session_state.board:
     for num in row:
-        cls = f"cell c{num}" if num != 0 else "cell"
-        txt = str(num) if num != 0 else ""
-        st.markdown(f'<div class="{cls}">{txt}</div>', unsafe_allow_html=True)
-st.markdown('</div></div>', unsafe_allow_html=True)
+        board_html += f'<div class="cell cell-{num}">{num if num != 0 else ""}</div>'
+board_html += '</div></div>'
+st.markdown(board_html, unsafe_allow_html=True)
